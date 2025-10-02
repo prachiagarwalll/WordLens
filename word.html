@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Interactive OCR Word Meaning</title>
+  <style>
+    #wrapper {
+      position: relative;
+      display: inline-block;
+    }
+    #ocrImage {
+      max-width: 100%;
+    }
+    #overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      cursor: crosshair;
+    }
+    pre {
+      background: #f2f2f2;
+      padding: 10px;
+    }
+    #infoBox {
+      border: 1px solid #ccc;
+      padding: 10px;
+      margin-top: 15px;
+      background: #f9f9f9;
+      max-width: 600px;
+    }
+  </style>
+</head>
+<body>
+  <h2>Upload Document and Click on Words</h2>
+  <input type="file" id="imageInput" accept="image/*" />
+  <div id="wrapper">
+    <img id="ocrImage" />
+    <canvas id="overlay"></canvas>
+  </div>
+  <pre id="outputText"></pre>
+
+  <div id="infoBox"><strong>Word info will appear here when you click a word.</strong></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
+  <script>
+    const imageInput = document.getElementById("imageInput");
+    const ocrImage = document.getElementById("ocrImage");
+    const canvas = document.getElementById("overlay");
+    const outputText = document.getElementById("outputText");
+    const infoBox = document.getElementById("infoBox");
+
+    let words = [];
+
+    imageInput.addEventListener("change", async (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const imageURL = URL.createObjectURL(file);
+      ocrImage.src = imageURL;
+
+      ocrImage.onload = async () => {
+        canvas.width = ocrImage.width;
+        canvas.height = ocrImage.height;
+
+        const result = await Tesseract.recognize(ocrImage, 'eng', {
+          logger: m => console.log(m)
+        });
+
+        const ctx = canvas.getContext("2d");
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.strokeStyle = "red";
+        ctx.lineWidth = 2;
+        ctx.font = "12px Arial";
+        words = [];
+
+        result.data.words.forEach(word => {
+          const { x0, y0, x1, y1 } = word.bbox;
+          ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+          ctx.fillStyle = "rgba(255, 0, 0, 0.2)";
+          ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+          words.push({ text: word.text, bbox: word.bbox });
+        });
+
+        outputText.textContent = result.data.text;
+      };
+    });
+
+    canvas.addEventListener("click", async (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+
+      for (const word of words) {
+        const { x0, y0, x1, y1 } = word.bbox;
+        if (x >= x0 && x <= x1 && y >= y0 && y <= y1) {
+          infoBox.innerHTML = `🔍 Looking up <b>${word.text}</b>...`;
+          fetchMeaningAndWiki(word.text);
+          break;
+        }
+      }
+    });
+
+    async function fetchMeaningAndWiki(word) {
+      try {
+        // Dictionary API
+        const dictRes = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${word}`);
+        const dictData = await dictRes.json();
+        let meaning = "Not found.";
+        if (Array.isArray(dictData)) {
+          meaning = dictData[0]?.meanings?.[0]?.definitions?.[0]?.definition || "Not found.";
+        }
+
+        // Wikipedia API
+        const wikiRes = await fetch(`https://en.wikipedia.org/w/api.php?action=opensearch&format=json&origin=*&search=${word}`);
+        const wikiData = await wikiRes.json();
+        const wikiLink = wikiData[3]?.[0] || "#";
+
+        infoBox.innerHTML = `
+          <strong>Word:</strong> ${word}<br>
+          <strong>Meaning:</strong> ${meaning}<br>
+          <strong>Wikipedia:</strong> <a href="${wikiLink}" target="_blank">${wikiLink}</a>
+        `;
+      } catch (err) {
+        infoBox.innerHTML = "❌ Error fetching info for " + word;
+        console.error(err);
+      }
+    }
+  </script>
+</body>
+</html>
